@@ -1,0 +1,62 @@
+name: Customize Jetson Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  customize-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download Base Image
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: 'gerth2/photon-jetson-image-test'
+          tag: 'v0.2'
+          fileName: 'jetson.img'
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Set Up Loop Device
+        run: |
+          sudo losetup -fP jetson.img
+          LOOP_DEVICE=$(sudo losetup -j jetson.img | cut -d':' -f1)
+          echo "LOOP_DEVICE=$LOOP_DEVICE" >> $GITHUB_ENV
+
+      - name: Mount Partitions
+        run: |
+          sudo mkdir -p /mnt/jetson
+          sudo mount ${LOOP_DEVICE}p1 /mnt/jetson
+
+      - name: Prepare Chroot Environment
+        run: |
+          sudo mount --bind /dev /mnt/jetson/dev
+          sudo mount --bind /proc /mnt/jetson/proc
+          sudo mount --bind /sys /mnt/jetson/sys
+          sudo cp /etc/resolv.conf /mnt/jetson/etc/resolv.conf
+
+      - name: Install PV
+        run: |
+          sudo chroot /mnt/jetson /bin/bash -c "
+            apt-get update
+            sudo apt-get install openjdk-17-jdk
+            sudo apt install libxrandr
+            sudo wget https://github.com/FRC-Team-4143/GpuDetectorJNI/releases/download/v0.2/lib971apriltag.so /usr/lib
+
+            echo 'Custom configuration' > /etc/custom.conf
+          "
+
+      - name: Clean Up
+        run: |
+          sudo umount /mnt/jetson/dev
+          sudo umount /mnt/jetson/proc
+          sudo umount /mnt/jetson/sys
+          sudo umount /mnt/jetson
+          sudo losetup -d $LOOP_DEVICE
+
+      - name: Upload Customized Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: customized-jetson-image
+          path: jetson.img
